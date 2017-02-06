@@ -9,8 +9,10 @@ package org.sonatype.tycho.m2e.internal;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 
 import org.apache.maven.project.MavenProject;
 import org.eclipse.core.resources.ICommand;
@@ -30,6 +32,8 @@ import org.eclipse.core.runtime.Status;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.JavaCore;
+import org.eclipse.jdt.core.JavaModelException;
+import org.eclipse.jdt.internal.core.ClasspathEntry;
 import org.eclipse.m2e.core.project.MavenProjectUtils;
 import org.eclipse.m2e.core.project.configurator.AbstractProjectConfigurator;
 import org.eclipse.pde.core.plugin.IPluginModelBase;
@@ -147,9 +151,67 @@ public class PDEProjectHelper
         {
             addProjectForUpdateClasspath( project );
         }
+        
+        handleTestClassPath(project, mavenProject, monitor);
+    }
+    
+    private void handleTestClassPath(IProject project, MavenProject mavenProject, IProgressMonitor monitor) throws CoreException {
+    	
+    	IPath testSourceLocation = getTestSourceLocation(project, mavenProject, monitor);
+    	if(testSourceLocation!=null) {
+    		
+    		IPath testOutputLocation = getTestOutputLocation(project, mavenProject, monitor);
+    		IJavaProject javaProject = JavaCore.create(project);
+    		IClasspathEntry testSourceEntry = JavaCore.newSourceEntry(testSourceLocation, ClasspathEntry.EXCLUDE_NONE, testOutputLocation);
+    		
+    		IClasspathEntry[] classpathEntries = addClassPathEntry(javaProject, testSourceEntry);
+    		javaProject.setRawClasspath(classpathEntries, monitor);
+    	}
+    	
+    }
+    
+    private IClasspathEntry[] addClassPathEntry(IJavaProject javaProject, IClasspathEntry classPathEntry) throws JavaModelException {
+    	List<IClasspathEntry> classpathEntries = new ArrayList<>(Arrays.asList(javaProject.getRawClasspath()));
+    	IClasspathEntry toReplaceClassPathEntry = null;
+    	for(IClasspathEntry iClassPathEntry : classpathEntries) {
+    		if(Objects.equals(iClassPathEntry.getPath(), classPathEntry.getPath())) {
+    			toReplaceClassPathEntry = iClassPathEntry;
+    		}
+    	}
+    	if(toReplaceClassPathEntry!=null) {
+    		classpathEntries.remove(toReplaceClassPathEntry);
+    	}
+    	classpathEntries.add(classPathEntry);
+    	return classpathEntries.toArray(new IClasspathEntry[classpathEntries.size()]);
     }
 
-    private void addProjectForUpdateClasspath( IProject project )
+    private IPath getTestSourceLocation(IProject project, MavenProject mavenProject, IProgressMonitor monitor) throws CoreException {
+    	
+    	String testSourceDirectory = mavenProject.getBuild().getTestSourceDirectory();
+		File sourceDirectory = new File(testSourceDirectory);
+    	if(!sourceDirectory.exists()) {
+    		return null;
+    	}
+    	IPath relPath = MavenProjectUtils.getProjectRelativePath(project, testSourceDirectory);
+    	IFolder folder = project.getFolder(relPath);
+    	folder.refreshLocal(IResource.DEPTH_INFINITE, monitor);
+    	
+		return folder.getFullPath();
+	}
+    
+    private static IPath getTestOutputLocation(IProject project, MavenProject mavenProject, IProgressMonitor monitor) throws CoreException {
+    	
+    	String testOutputDirectory = mavenProject.getBuild().getTestOutputDirectory();
+		File outputDirectory = new File(testOutputDirectory);
+    	outputDirectory.mkdirs();
+    	IPath relPath = MavenProjectUtils.getProjectRelativePath(project, testOutputDirectory);
+    	IFolder folder = project.getFolder(relPath);
+    	folder.refreshLocal(IResource.DEPTH_INFINITE, monitor);
+    	return folder.getFullPath();
+    	
+    }
+
+	private void addProjectForUpdateClasspath( IProject project )
     {
         synchronized ( projectsForUpdateClasspath )
         {
